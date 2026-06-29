@@ -96,16 +96,76 @@ well_names   = [c.replace("WELL_", "") for c in well_columns]
 # ─────────────────────────────────────────────
 #  Sidebar — model selector
 # ─────────────────────────────────────────────
-st.sidebar.header("⚙️ Model Configuration")
+# ── Scenario definitions ──
+SCENARIOS = {
+    "🟢 Early Life — RF": {
+        "model": "Random Forest",
+        "well": "15/9-F-11",
+        "on_stream": 680.0, "oil": 65000.0, "gas": 2800000.0,
+        "well_age": 18, "cum_oil": 350000.0,
+        "water_cut_lag1": 18.0, "oil_lag1": 62000.0, "gi": 0.0, "wi": 0.0,
+    },
+    "🟡 Mid Life — RF": {
+        "model": "Random Forest",
+        "well": "15/9-F-4",
+        "on_stream": 620.0, "oil": 35000.0, "gas": 1500000.0,
+        "well_age": 42, "cum_oil": 900000.0,
+        "water_cut_lag1": 55.0, "oil_lag1": 38000.0, "gi": 0.0, "wi": 30000.0,
+    },
+    "🔵 Stable — LR": {
+        "model": "Linear Regression",
+        "well": "15/9-F-1 C",
+        "on_stream": 640.0, "oil": 28000.0, "gas": 1200000.0,
+        "well_age": 36, "cum_oil": 700000.0,
+        "water_cut_lag1": 45.0, "oil_lag1": 30000.0, "gi": 0.0, "wi": 20000.0,
+    },
+    "🔴 Late Life — GB": {
+        "model": "Gradient Boosting",
+        "well": "15/9-F-14",
+        "on_stream": 480.0, "oil": 12000.0, "gas": 800000.0,
+        "well_age": 72, "cum_oil": 2000000.0,
+        "water_cut_lag1": 82.0, "oil_lag1": 14000.0, "gi": 0.0, "wi": 120000.0,
+    },
+}
+
+# ── Session state defaults ──
+if "scenario_loaded" not in st.session_state:
+    st.session_state.scenario_loaded = False
+if "inputs" not in st.session_state:
+    sc = SCENARIOS["🟡 Mid Life — RF"]
+    st.session_state.inputs = dict(sc)
+
+def load_scenario(name):
+    sc = SCENARIOS[name]
+    st.session_state.inputs = dict(sc)
+    st.session_state.scenario_loaded = True
+
+st.sidebar.header("⚙️ Configuration")
+
+# ── Scenario quick-loader ──
+st.sidebar.markdown("**Quick Scenario Load**")
+for sc_name in SCENARIOS:
+    if st.sidebar.button(sc_name, use_container_width=True):
+        load_scenario(sc_name)
+
+st.sidebar.markdown("---")
+
+# ── Model selector — follows scenario or manual override ──
+default_model = st.session_state.inputs.get("model", "Random Forest")
+model_options = list(available_models.keys())
+default_idx   = model_options.index(default_model) if default_model in model_options else 0
+
 selected_model_name = st.sidebar.selectbox(
-    "Choose Prediction Model",
-    list(available_models.keys()),
+    "Model",
+    model_options,
+    index=default_idx,
     help=(
-        "Random Forest → lowest MAE (4.37%), best average accuracy.\n\n"
-        "Gradient Boosting → better for high water-cut values (≥ 80%).\n\n"
-        "Linear Regression → simplest baseline."
+        "Random Forest → lowest MAE (4.37%)\n"
+        "Gradient Boosting → better at high water-cut (≥ 80%)\n"
+        "Linear Regression → simplest baseline"
     ),
 )
+st.session_state.inputs["model"] = selected_model_name
 model = joblib.load(available_models[selected_model_name])
 
 if selected_model_name == "Random Forest":
@@ -130,43 +190,59 @@ st.markdown("---")
 #  Input form — 4-column layout
 # ─────────────────────────────────────────────
 st.subheader("Well Input Data")
+st.caption("Use the sidebar buttons to instantly load a scenario — or edit values manually below.")
 
-# Default values — Track B (mid-life, safe for all three models)
+inp = st.session_state.inputs
+
+def _well_idx(name):
+    try:    return well_names.index(name)
+    except: return 0
+
 r1c1, r1c2, r1c3, r1c4 = st.columns(4)
 
 with r1c1:
-    selected_well  = st.selectbox("Wellbore", well_names)
-    on_stream      = st.number_input("ON_STREAM (hrs)", min_value=0.0, max_value=744.0, value=620.0, step=1.0)
-    oil            = st.number_input("OIL this month (m³)", min_value=0.0, value=35000.0, step=100.0)
+    selected_well  = st.selectbox("Wellbore", well_names,
+                        index=_well_idx(inp.get("well", well_names[0])))
+    on_stream      = st.number_input("ON_STREAM (hrs)", min_value=0.0, max_value=744.0,
+                        value=float(inp.get("on_stream", 620.0)), step=1.0)
+    oil            = st.number_input("OIL this month (m³)", min_value=0.0,
+                        value=float(inp.get("oil", 35000.0)), step=100.0)
 
 with r1c2:
-    gas            = st.number_input("GAS this month (m³)", min_value=0.0, value=1500000.0, step=1000.0)
-    well_age       = st.number_input("WELL_AGE_MONTHS", min_value=1, value=36, step=1)
-    cum_oil        = st.number_input("CUM_OIL (m³)", min_value=0.0, value=900000.0, step=1000.0)
+    gas            = st.number_input("GAS this month (m³)", min_value=0.0,
+                        value=float(inp.get("gas", 1500000.0)), step=1000.0)
+    well_age       = st.number_input("WELL_AGE_MONTHS", min_value=1,
+                        value=int(inp.get("well_age", 36)), step=1)
+    cum_oil        = st.number_input("CUM_OIL (m³)", min_value=0.0,
+                        value=float(inp.get("cum_oil", 900000.0)), step=1000.0)
 
 with r1c3:
     water_cut_lag1 = st.slider(
         "Last month's WATER_CUT (%)",
-        min_value=0.0, max_value=100.0, value=45.0, step=0.5,
-        help="Most important feature (~92% importance). If ≥ 80% switch model to Gradient Boosting.",
+        min_value=0.0, max_value=100.0,
+        value=float(inp.get("water_cut_lag1", 45.0)), step=0.5,
+        help="Most important feature (~92% importance). If ≥ 80% switch to Gradient Boosting.",
     )
-    oil_lag1       = st.number_input("Last month's OIL (m³)", min_value=0.0, value=38000.0, step=100.0)
+    oil_lag1       = st.number_input("Last month's OIL (m³)", min_value=0.0,
+                        value=float(inp.get("oil_lag1", 38000.0)), step=100.0)
 
 with r1c4:
     st.markdown("**Injection (optional)**")
-    gi = st.number_input("GI — Gas Injection (m³)",   min_value=0.0, value=0.0, step=100.0)
-    wi = st.number_input("WI — Water Injection (m³)", min_value=0.0, value=20000.0, step=100.0)
-
-    # Scenario quick-load guide
-    with st.expander("Scenario reference values"):
-        st.markdown("""
-| Scenario | WC Lag | Well Age | CUM_OIL | Model |
-|---|---|---|---|---|
-| 🟢 Early life | 18% | 18 mo | 350,000 | RF |
-| 🟡 Mid life | 45% | 36 mo | 900,000 | RF |
-| 🔵 Stable | 45% | 36 mo | 700,000 | LR |
-| 🔴 Late life | 82% | 72 mo | 2,000,000 | GB |
-""")
+    gi = st.number_input("GI — Gas Injection (m³)", min_value=0.0,
+                        value=float(inp.get("gi", 0.0)), step=100.0)
+    wi = st.number_input("WI — Water Injection (m³)", min_value=0.0,
+                        value=float(inp.get("wi", 20000.0)), step=100.0)
+    st.markdown("")
+    # Show which scenario is currently loaded
+    active_sc = next((k for k, v in SCENARIOS.items()
+                      if v["water_cut_lag1"] == inp.get("water_cut_lag1")
+                      and v["well_age"] == inp.get("well_age")), "Custom")
+    st.markdown(
+        f"<div style='background:#112240;border:1px solid #1e3a5f;border-radius:8px;"
+        f"padding:8px 12px;font-size:12px;color:#8899aa;'>"
+        f"<span style='color:#19CA9C;font-weight:600;'>Active scenario:</span><br>{active_sc}</div>",
+        unsafe_allow_html=True,
+    )
 
 # High water-cut warning
 if selected_model_name == "Random Forest" and water_cut_lag1 >= 80:

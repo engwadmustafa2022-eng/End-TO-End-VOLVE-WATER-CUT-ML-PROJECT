@@ -491,40 +491,45 @@ if page == "📈 Field Production Profile & History":
 
     # ── Combined Line Chart: Oil / Water / WI ──
     st.subheader("Water Breakthrough & Sweep Efficiency")
-    fig_combined = go.Figure()
+    # Dual-axis: Oil / Water / WI on left axis, Gas on right axis
+    fig_combined = make_subplots(
+        specs=[[{"secondary_y": True}]],
+    )
     fig_combined.add_trace(go.Scatter(
         x=annual_prod["YEAR"], y=annual_prod["OIL"],
         name="Oil Produced", mode="lines+markers",
-        line=dict(color="#19CA9C", width=3, shape="spline"), marker_size=8,
+        line=dict(color="#19CA9C", width=3, shape="spline"), marker_size=9,
         customdata=annual_prod["OIL"]/volumes["OIL"],
         hovertemplate="<b>%{x}</b><br>Oil: %{y:,.0f} m³ (%{customdata:,.0f} bbl)<extra></extra>"
-    ))
+    ), secondary_y=False)
     fig_combined.add_trace(go.Scatter(
         x=annual_prod["YEAR"], y=annual_prod["WATER"],
         name="Water Produced", mode="lines+markers",
-        line=dict(color="#636EFA", width=3, shape="spline"), marker_size=8,
+        line=dict(color="#636EFA", width=3, shape="spline"), marker_size=9,
         customdata=annual_prod["WATER"]/volumes["WATER"],
         hovertemplate="<b>%{x}</b><br>Water: %{y:,.0f} m³ (%{customdata:,.0f} bbl)<extra></extra>"
-    ))
+    ), secondary_y=False)
     fig_combined.add_trace(go.Scatter(
         x=annual_inj["YEAR"], y=annual_inj["WI"],
         name="Water Injection", mode="lines+markers",
         line=dict(color="#AB63FA", width=2, dash="dot", shape="spline"), marker_size=7,
         customdata=annual_inj["WI"]/volumes["WATER"],
         hovertemplate="<b>%{x}</b><br>WI: %{y:,.0f} m³ (%{customdata:,.0f} bbl)<extra></extra>"
-    ))
+    ), secondary_y=False)
     fig_combined.add_trace(go.Scatter(
         x=annual_prod["YEAR"], y=annual_prod["GAS"],
-        name="Gas Produced", mode="lines+markers",
-        line=dict(color="#EE553C", width=2, shape="spline"), marker_size=7,
+        name="Gas Produced (right axis)", mode="lines+markers",
+        line=dict(color="#EE553C", width=2, dash="dash", shape="spline"), marker_size=7,
         hovertemplate="<b>%{x}</b><br>Gas: %{y:,.0f} m³<extra></extra>"
-    ))
+    ), secondary_y=True)
     fig_combined.update_layout(
         xaxis=dict(title="Year", tickmode="array", tickvals=annual_prod["YEAR"]),
-        yaxis=dict(title="Volume (m³)", hoverformat=",.0f"),
-        legend=dict(orientation="h", x=0.1, y=-0.18),
-        hovermode="x unified", font_size=12, height=450, template="plotly_dark"
+        legend=dict(orientation="h", x=0, y=-0.22),
+        hovermode="x unified", font_size=12, height=480, template="plotly_dark",
+        margin=dict(t=20, b=80),
     )
+    fig_combined.update_yaxes(title_text="Liquid Volume (m³) — Oil / Water / WI", secondary_y=False, tickformat=",.0f")
+    fig_combined.update_yaxes(title_text="Gas Volume (m³)", secondary_y=True, tickformat=",.0f", showgrid=False, color="#EE553C")
     st.plotly_chart(fig_combined, use_container_width=True)
 
     show_insight(
@@ -608,39 +613,54 @@ elif page == "🧬 Reservoir Dynamics & Well Performance":
         st.subheader("Correlation Matrix — Water Cut Drivers")
 
         # Only variables directly relevant to water cut
-        corr_vars = ["OIL", "WATER", "GAS", "WI", "GI", "ON_STREAM"]
+        import numpy as np
+
+        # GI excluded — zero-variance in this dataset (all wells have GI = 0)
+        # Including it produces NaN correlations and misleads the viewer
+        corr_vars = ["OIL", "WATER", "GAS", "WI", "ON_STREAM"]
         corr_df   = volve_df[corr_vars].corr().round(2)
 
-        # Mask upper triangle for clean symmetric matrix
-        import numpy as np
-        mask = np.triu(np.ones_like(corr_df, dtype=bool), k=1)
-        z_masked = corr_df.values.copy().astype(float)
-        z_masked[mask] = None
+        mask_upper = np.triu(np.ones_like(corr_df, dtype=bool), k=1)
+        z_masked   = corr_df.values.copy().astype(float)
+        z_masked[mask_upper] = None   # hide upper triangle
 
         annotations = []
-        for i, row in enumerate(corr_df.index):
-            for j, col in enumerate(corr_df.columns):
-                if not mask[i, j]:
+        for i, row_name in enumerate(corr_df.index):
+            for j, col_name in enumerate(corr_df.columns):
+                if not mask_upper[i, j]:
+                    val = corr_df.loc[row_name, col_name]
                     annotations.append(dict(
-                        x=col, y=row, text=f"{corr_df.loc[row, col]:.2f}",
+                        x=col_name, y=row_name,
+                        text=f"{val:.2f}",
                         showarrow=False,
-                        font=dict(color="white" if abs(corr_df.loc[row, col]) > 0.4 else "#aaa", size=12)
+                        font=dict(
+                            color="white" if abs(val) > 0.35 else "#888",
+                            size=13, family="Inter"
+                        )
                     ))
 
         fig_corr = go.Figure(data=go.Heatmap(
             z=z_masked, x=corr_df.columns, y=corr_df.index,
             colorscale="RdBu", zmid=0, zmin=-1, zmax=1,
-            colorbar=dict(title="r", thickness=14),
-            hovertemplate="X: %{x}<br>Y: %{y}<br>r = %{z:.2f}<extra></extra>",
+            colorbar=dict(title="r", thickness=14, tickfont=dict(size=11)),
+            hovertemplate="<b>%{y} vs %{x}</b><br>r = %{z:.2f}<extra></extra>",
             name=""
         ))
         fig_corr.update_layout(
             annotations=annotations,
-            xaxis=dict(side="bottom"), yaxis=dict(autorange="reversed"),
-            font_size=12, height=480, template="plotly_dark",
-            margin=dict(t=30, b=60)
+            xaxis=dict(side="bottom", tickfont=dict(size=12)),
+            yaxis=dict(autorange="reversed", tickfont=dict(size=12)),
+            font_size=12, height=440, template="plotly_dark",
+            margin=dict(t=10, b=50, l=80)
         )
         st.plotly_chart(fig_corr, use_container_width=True)
+
+        st.caption(
+            "Note: GI (Gas Injection) is excluded from this matrix — "
+            "its value is zero across all production wellbores in the Volve dataset, "
+            "making correlation calculation undefined (division by zero variance). "
+            "GI is retained in the ML feature set as a structural feature."
+        )
 
         show_insight(
             "Key Correlations with Water Cut",
